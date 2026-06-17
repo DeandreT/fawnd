@@ -1,0 +1,10 @@
+# Example profile: fast actuation on WASD for gaming, rapid trigger on.
+actuation = 2.0
+rapid_trigger = true
+turbo = false
+
+[keys]
+W = 1.0
+A = 1.0
+S = 1.0
+D = 1.0

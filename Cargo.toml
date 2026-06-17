@@ -1,0 +1,37 @@
+[package]
+name = "fawnd"
+version = "0.1.0"
+edition = "2024"
+description = "A userspace driver and CLI for the DrunkDeer A75 Hall-effect keyboard"
+license = "MIT"
+
+[lib]
+name = "fawnd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fawnd"
+path = "src/main.rs"
+
+[[bin]]
+name = "fawnd-gui"
+path = "src/bin/fawnd-gui.rs"
+
+[dependencies]
+# GUI.
+eframe = "0.34"
+egui = "0.34"
+rfd = "0.17"
+# HID transport. `hidapi` wraps the system hidraw/libusb backend.
+hidapi = "2.6"
+# CLI parsing.
+clap = { version = "4.5", features = ["derive"] }
+# Config / profile (de)serialization.
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+# Errors.
+thiserror = "2.0"
+anyhow = "1.0"
+# Logging.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
