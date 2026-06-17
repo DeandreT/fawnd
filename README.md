@@ -158,3 +158,7 @@ behavior. See [Planned: daemon & IPC](#planned-daemon--ipc).
 - [ ] Apply-on-hotplug — re-assert the active profile when the keyboard reconnects
       (wake, dock, KVM switch)
 - [ ] IPC API exposing the live key-depth stream + current state to other tools
+
+## License
+
+[MIT](LICENSE) © Deandre
