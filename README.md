@@ -1,9 +1,9 @@
 # fawnd
 
-A userspace driver and CLI for the **DrunkDeer A75** Hall-effect (magnetic
-switch) keyboard. Lets you configure per-key actuation points,
-rapid trigger / turbo (snap-tap), and lighting from the command line or a TOML
-profile.
+A userspace driver for the **DrunkDeer A75** Hall-effect (magnetic switch)
+keyboard, with a CLI, an egui GUI, and a background daemon. Configure per-key
+actuation points, rapid trigger / turbo (snap-tap), and lighting; watch live key
+depth; and switch profiles automatically based on the focused window.
 
 ## What it talks to
 
@@ -29,7 +29,7 @@ reports use the same framing.
 
 | Command | Byte | Notes |
 |---|---|---|
-| Identity | `0xA0` | `[A0 02]`; reply carries model sig (bytes 3..6), firmware (LE u16 at 6..8), turbo (14), rapid-trigger (15) |
+| Identity | `0xA0` | `[A0 02]`; reply carries model sig (bytes 4..7), firmware (LE u16 at 7..9), turbo (15), rapid-trigger (16) |
 | LED mode | `0xAE` | `[AE 01 turbo dir seq speed brightness rgb]` |
 | Modify key | `0xB6` | `[B6 sub 00 row <keys…>]`; sub: `01`=actuation, `04`=downstroke, `05`=upstroke, `03`=key-tracking toggle |
 | Rapid trigger | `0xB5` | `[B5 00 1E 01 00 00 01 turbo rt]` |
@@ -61,8 +61,13 @@ cargo run --bin fawnd-gui
 
 An [egui](https://github.com/emilk/egui)/eframe app: a visual key grid (click to
 select keys, colour = actuation depth) with side-panel controls for global and
-per-key actuation, rapid trigger / turbo, lighting, and profile load/save. All
-device I/O runs on a background worker thread so the UI never blocks.
+per-key actuation, rapid trigger / turbo, lighting, and profile load/save, plus a
+live key-depth view.
+
+The GUI is a **daemon client** — it talks to `fawnd-daemon` over the socket (on a
+background worker thread, so the UI never blocks) rather than opening the device
+itself. Start `fawnd-daemon` first; if it isn't running the GUI shows "offline"
+with a Reconnect button.
 
 ## CLI
 
@@ -74,6 +79,10 @@ fawnd rapid-trigger on --turbo  # enable rapid trigger + snap-tap
 fawnd apply profile.toml        # apply a saved profile
 fawnd reset                     # restore defaults
 ```
+
+These commands open the device directly. If `fawnd-daemon` is running, use the
+`fawnd daemon …` subcommands (below) instead, so the two don't contend for the
+device.
 
 ## Daemon & auto profile switching
 
@@ -133,7 +142,7 @@ src/
 ├── config.rs        TOML profiles (load/save/apply)
 ├── error.rs         error type
 ├── gui/             egui UI
-│   ├── worker.rs    background device thread (Command/Event channels)
+│   ├── worker.rs    background IPC client thread (Command/Event channels)
 │   ├── app.rs       egui App: key grid + side-panel controls
 │   └── mod.rs       window setup / run()
 ├── ipc.rs           daemon/client wire protocol (JSON over a Unix socket)
@@ -146,29 +155,28 @@ src/
 └── bin/fawnd-daemon.rs daemon entry      (bin: fawnd-daemon)
 ```
 
-### Planned: daemon & IPC
+### Daemon & IPC
 
-Today the GUI opens the keyboard directly. To support dynamic behavior (per-app
-switching, hotkeys, hotplug) without two processes fighting over the device's
-request/response stream, ownership moves behind a daemon:
+The daemon is the sole owner of the keyboard; the CLI and GUI are IPC clients.
+A single owner avoids two processes fighting over the device's request/response
+stream.
 
 ```
                  ┌────────────┐   Unix socket    ┌──────────────┐
    GUI / CLI ───▶│ IPC client │ ───────────────▶ │ fawnd-daemon │──▶ HID device
                  └────────────┘  (commands /      │  - profiles  │
                                   state / depth)   │  - rules     │
-                                                   │  - watchers  │
+                                                   │  - watcher   │
                                                    └──────────────┘
                                                           ▲
-                          focus watcher (KWin/sway/X11) ──┘
-                          hotkeys · hotplug (udev/HID)
+                              focus watcher (KWin) ───────┘
 ```
 
-- `daemon`: device owner, profile store, rule engine, IPC server.
-- `ipc`: shared request/response types + client used by CLI and GUI.
-- `watch`: pluggable focus/hotkey/hotplug sources that emit profile-switch events.
-
-The existing `Controller` is reused unchanged as the daemon's device layer.
+- `daemon`: a device-owning thread processes jobs from a channel; per-connection
+  handlers and the watcher are producers, so device access stays serialized.
+- `ipc`: shared request/response types + the `Client` used by CLI and GUI.
+- `watch`: focus watcher (KWin via D-Bus today; sway/Hyprland/X11 planned).
+  Hotkey and hotplug sources are planned.
 
 ## Roadmap
 
@@ -181,11 +189,10 @@ The existing `Controller` is reused unchanged as the daemon's device layer.
 
 The keyboard stores its config in firmware (settings persist across unplug), so a
 daemon is **not** needed to keep a profile applied — it exists for *dynamic*
-behavior. See [Planned: daemon & IPC](#planned-daemon--ipc).
+behavior. See [Daemon & IPC](#daemon--ipc).
 
-- [x] `fawnd-daemon`: background process that owns the HID device, with a Unix
-      socket + profile store (status / list / apply); CLI talks to it via
-      `fawnd daemon …`. GUI-as-client still pending.
+- [x] `fawnd-daemon`: owns the HID device with a Unix socket + profile store;
+      the CLI (`fawnd daemon …`) and the GUI are both IPC clients.
 - [x] Per-app auto profile switching — focused-window → profile rules
       (`rules.toml`), via a KWin script + D-Bus on KDE Wayland. sway/Hyprland and
       X11 backends still pending.

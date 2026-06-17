@@ -60,7 +60,7 @@ pub mod modify {
 }
 
 /// LED lighting effect sequences (payload value for `LED_MODE`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum LedSequence {
     Off = 0x00,

@@ -188,11 +188,27 @@ fn handle(req: Request, state: &mut State) -> Response {
             ctl.set_actuation_all(mm);
             into_response(ctl.flush_actuation(), &mut state.active_profile)
         }
+        Request::ApplyActuation(values) => {
+            for (i, mm) in values.iter().enumerate() {
+                ctl.set_actuation_index(i, *mm);
+            }
+            into_response(ctl.flush_actuation(), &mut state.active_profile)
+        }
         Request::SetRapidTrigger {
             rapid_trigger,
             turbo,
         } => into_response(
             ctl.set_rapid_trigger(rapid_trigger, turbo),
+            &mut state.active_profile,
+        ),
+        Request::SetLed {
+            direction,
+            sequence,
+            speed,
+            brightness,
+            rgb,
+        } => into_response(
+            ctl.set_led(direction, sequence, speed, brightness, rgb),
             &mut state.active_profile,
         ),
         Request::Reset => {

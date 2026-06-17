@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::protocol::consts::LedSequence;
 
 /// Path to the daemon's control socket.
 ///
@@ -33,8 +34,18 @@ pub enum Request {
     ApplyProfile(String),
     /// Set the actuation point (mm) for every key.
     SetActuationAll(f32),
+    /// Set a full per-key actuation map (mm), length [`crate::protocol::consts::TOTAL_KEYS`].
+    ApplyActuation(Vec<f32>),
     /// Toggle global rapid trigger / turbo.
     SetRapidTrigger { rapid_trigger: bool, turbo: bool },
+    /// Set lighting.
+    SetLed {
+        direction: u8,
+        sequence: LedSequence,
+        speed: u8,
+        brightness: u8,
+        rgb: u8,
+    },
     /// Restore factory defaults.
     Reset,
     /// Sample one live key-depth frame.

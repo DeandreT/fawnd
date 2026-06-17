@@ -10,7 +10,7 @@ use egui::{
 
 use crate::config::Profile;
 use crate::controller::DEPTH_MAX_RAW;
-use crate::protocol::Identity;
+use crate::ipc::Status;
 use crate::protocol::consts::{ACTUATION_MAX, ACTUATION_MIN, LedSequence, TOTAL_KEYS};
 use crate::protocol::layout::{self, KEYBOARD_LAYOUT, WASD_KEYS};
 
@@ -56,7 +56,7 @@ const SEQUENCES: &[(LedSequence, &str)] = &[
 pub struct App {
     worker: Worker,
 
-    identity: Option<Identity>,
+    info: Option<Status>,
     connected: bool,
     status: String,
 
@@ -83,7 +83,7 @@ impl App {
         setup_style(&cc.egui_ctx);
         App {
             worker: Worker::spawn(cc.egui_ctx.clone()),
-            identity: None,
+            info: None,
             connected: false,
             status: "starting…".into(),
             actuation: [2.0; TOTAL_KEYS],
@@ -104,16 +104,16 @@ impl App {
     fn drain_events(&mut self) {
         for evt in self.worker.poll() {
             match evt {
-                Event::Connected(id) => {
+                Event::Connected(status) => {
                     self.connected = true;
-                    self.rapid_trigger = id.rapid_trigger;
-                    self.turbo = id.turbo;
-                    self.status = format!("Connected to {:?}", id.model);
-                    self.identity = Some(id);
+                    self.rapid_trigger = status.rapid_trigger;
+                    self.turbo = status.turbo;
+                    self.status = format!("Connected to {}", status.model);
+                    self.info = Some(status);
                 }
                 Event::Disconnected(why) => {
                     self.connected = false;
-                    self.identity = None;
+                    self.info = None;
                     self.status = format!("Disconnected: {why}");
                 }
                 Event::Status(s) => self.status = s,
@@ -187,11 +187,12 @@ impl App {
                     ui.label(RichText::new("DrunkDeer A75").color(TEXT_DIM));
                     ui.add_space(8.0);
                     status_pill(ui, self.connected);
-                    if let Some(id) = &self.identity {
-                        ui.label(
-                            RichText::new(format!("{:?} · fw {}", id.model, id.firmware_version))
-                                .color(TEXT_DIM),
-                        );
+                    if let Some(info) = &self.info {
+                        let mut label = format!("{} · fw {}", info.model, info.firmware);
+                        if let Some(profile) = &info.active_profile {
+                            label.push_str(&format!(" · {profile}"));
+                        }
+                        ui.label(RichText::new(label).color(TEXT_DIM));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Reconnect").clicked() {
