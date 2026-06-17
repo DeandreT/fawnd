@@ -47,7 +47,9 @@ pub struct Identity {
 impl Identity {
     /// Parse an identity reply. `data` is the report payload *after* the report
     /// ID byte (i.e. starting at the command byte). Returns `None` if the
-    /// command byte is not [`consts::cmd::IDENTITY`] or the payload is too short.
+    /// command byte is not [`consts::cmd::IDENTITY`], the payload is too short,
+    /// or it's a zero-signature stub the device emits while busy (which would
+    /// otherwise decode to a bogus `Unknown`/`0.00` identity).
     pub fn parse(data: &[u8]) -> Option<Identity> {
         // Layout (payload index): [0]=cmd 0xA0, [1]=0x02, [2]=0x00, [3]=0x01,
         // [4..7]=model signature, [7..9]=firmware (LE u16),
@@ -56,6 +58,9 @@ impl Identity {
             return None;
         }
         let sig = [data[4], data[5], data[6]];
+        if sig == [0, 0, 0] {
+            return None; // stub/echo reply, not a real identity
+        }
         let version = u16::from_le_bytes([data[7], data[8]]);
         Some(Identity {
             model: Model::from_signature(sig),

@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "fawnd-gui"
 path = "src/bin/fawnd-gui.rs"
 
+[[bin]]
+name = "fawnd-daemon"
+path = "src/bin/fawnd-daemon.rs"
+
 [dependencies]
 # GUI.
 eframe = "0.34"
@@ -29,6 +33,8 @@ clap = { version = "4.5", features = ["derive"] }
 # Config / profile (de)serialization.
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+# IPC wire format (newline-delimited JSON over a Unix socket).
+serde_json = "1.0"
 # Errors.
 thiserror = "2.0"
 anyhow = "1.0"

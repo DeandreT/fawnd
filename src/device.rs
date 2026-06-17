@@ -6,7 +6,7 @@ use hidapi::{HidApi, HidDevice};
 
 use crate::error::{Error, Result};
 use crate::protocol::consts::{
-    PRODUCT_IDS, REPORT_ID, REPORT_LEN, USAGE, USAGE_PAGE, VENDOR_ID, cmd,
+    PRODUCT_IDS, REPORT_ID, REPORT_LEN, USAGE, USAGE_PAGE, VENDOR_ID,
 };
 use crate::protocol::packet::Payload;
 use crate::protocol::Identity;
@@ -64,14 +64,29 @@ impl Device {
         Ok(Some(payload))
     }
 
+    /// Discard reports queued from earlier writes (e.g. command echoes) until the
+    /// device goes quiet, so a following read sees only fresh replies.
+    ///
+    /// A short per-read timeout (rather than zero) is important: command echoes
+    /// trickle in with a few ms of delay, so a purely non-blocking drain would
+    /// miss the later ones and leave them to corrupt the next handshake.
+    pub fn drain(&self) -> Result<()> {
+        while self.read(Duration::from_millis(15))?.is_some() {}
+        Ok(())
+    }
+
     /// Perform the identity handshake and return the parsed reply.
     pub fn identity(&self) -> Result<Identity> {
+        // Flush stale echoes first; otherwise we may parse a leftover packet.
+        self.drain()?;
         self.write(&crate::protocol::packet::identity())?;
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
             if let Some(data) = self.read(Duration::from_millis(200))? {
-                if data.first() == Some(&cmd::IDENTITY) {
-                    return Identity::parse(&data).ok_or(Error::NoResponse);
+                // Skip non-identity packets and stub/echo replies that fail to
+                // parse; keep reading until a valid reply or the deadline.
+                if let Some(id) = Identity::parse(&data) {
+                    return Ok(id);
                 }
             }
         }

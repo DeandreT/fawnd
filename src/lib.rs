@@ -8,9 +8,11 @@
 
 pub mod config;
 pub mod controller;
+pub mod daemon;
 pub mod device;
 pub mod error;
 pub mod gui;
+pub mod ipc;
 pub mod protocol;
 
 pub use controller::Controller;

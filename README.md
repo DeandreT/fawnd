@@ -148,9 +148,9 @@ The keyboard stores its config in firmware (settings persist across unplug), so 
 daemon is **not** needed to keep a profile applied — it exists for *dynamic*
 behavior. See [Planned: daemon & IPC](#planned-daemon--ipc).
 
-- [ ] `fawnd-daemon`: background process that owns the HID device; CLI/GUI become
-      IPC clients over a Unix socket (single owner avoids contention on the
-      request/response stream)
+- [x] `fawnd-daemon`: background process that owns the HID device, with a Unix
+      socket + profile store (status / list / apply); CLI talks to it via
+      `fawnd daemon …`. GUI-as-client still pending.
 - [ ] Per-app auto profile switching — push a profile based on the focused window
       (KWin via D-Bus on Wayland; sway/Hyprland via their IPC; X11 via
       `_NET_ACTIVE_WINDOW`)

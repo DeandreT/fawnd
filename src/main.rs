@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use fawnd::config::Profile;
+use fawnd::ipc::{self, Request, Response};
 use fawnd::protocol::byte_to_mm;
 use fawnd::Controller;
 
@@ -42,6 +43,24 @@ enum Command {
     },
     /// Restore default configuration.
     Reset,
+    /// Talk to the running fawnd daemon.
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DaemonCommand {
+    /// Show keyboard status and active profile.
+    Status,
+    /// List profiles available in the store.
+    Profiles,
+    /// Apply a named profile from the store.
+    Apply {
+        /// Profile name (without the .toml extension).
+        name: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -53,6 +72,12 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    // Daemon client commands talk over the socket and never open the device.
+    if let Command::Daemon { command } = cli.command {
+        return run_daemon_client(command);
+    }
+
     let mut ctl = Controller::open()?;
 
     match cli.command {
@@ -87,7 +112,43 @@ fn main() -> anyhow::Result<()> {
             ctl.write_defaults()?;
             println!("restored defaults");
         }
+        Command::Daemon { .. } => unreachable!("handled before opening the device"),
     }
 
+    Ok(())
+}
+
+fn run_daemon_client(command: DaemonCommand) -> anyhow::Result<()> {
+    let mut client = ipc::Client::connect()?;
+    let response = match command {
+        DaemonCommand::Status => client.request(&Request::Status)?,
+        DaemonCommand::Profiles => client.request(&Request::ListProfiles)?,
+        DaemonCommand::Apply { name } => client.request(&Request::ApplyProfile(name))?,
+    };
+
+    match response {
+        Response::Ok => println!("ok"),
+        Response::Status(s) => {
+            println!("model:         {}", s.model);
+            println!("firmware:      {}", s.firmware);
+            println!("rapid trigger: {}", s.rapid_trigger);
+            println!("turbo:         {}", s.turbo);
+            println!(
+                "active profile: {}",
+                s.active_profile.as_deref().unwrap_or("(none)")
+            );
+        }
+        Response::Profiles(names) => {
+            if names.is_empty() {
+                println!("(no profiles in {})", fawnd::daemon::profiles_dir().display());
+            } else {
+                for name in names {
+                    println!("{name}");
+                }
+            }
+        }
+        Response::Depths(_) => println!("(depth frame received)"),
+        Response::Error(e) => anyhow::bail!("daemon error: {e}"),
+    }
     Ok(())
 }

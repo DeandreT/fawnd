@@ -18,6 +18,12 @@ pub enum Error {
 
     #[error("config error: {0}")]
     Config(String),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("daemon: {0}")]
+    Daemon(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
