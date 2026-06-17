@@ -4,6 +4,7 @@
 //! [`crate::controller::Controller`]: all device I/O happens on a background
 //! [`worker::Worker`] thread and the UI exchanges plain data with it.
 
+mod api;
 mod app;
 #[cfg(not(target_arch = "wasm32"))]
 mod worker;

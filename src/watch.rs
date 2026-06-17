@@ -76,22 +76,14 @@ pub fn start(job_tx: Sender<Job>) -> Result<Option<Watcher>> {
         current: None,
     };
 
-    let conn = zbus::blocking::connection::Builder::session()
-        .map_err(zerr)?
-        .name(DBUS_NAME)
-        .map_err(zerr)?
-        .serve_at(DBUS_PATH, service)
-        .map_err(zerr)?
-        .build()
-        .map_err(zerr)?;
+    let conn = zbus::blocking::connection::Builder::session()?
+        .name(DBUS_NAME)?
+        .serve_at(DBUS_PATH, service)?
+        .build()?;
 
     install_kwin_script()?;
 
     Ok(Some(Watcher { _conn: conn }))
-}
-
-fn zerr(e: zbus::Error) -> Error {
-    Error::Daemon(format!("dbus: {e}"))
 }
 
 /// Write the KWin script and (re)load it into the running compositor.

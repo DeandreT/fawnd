@@ -101,7 +101,7 @@ impl Client {
 
     /// Send one request and read one response.
     pub fn request(&mut self, req: &Request) -> Result<Response> {
-        let mut line = serde_json::to_string(req).map_err(|e| Error::Daemon(e.to_string()))?;
+        let mut line = serde_json::to_string(req)?;
         line.push('\n');
         self.writer.write_all(line.as_bytes())?;
         self.writer.flush()?;
@@ -110,6 +110,6 @@ impl Client {
         if self.reader.read_line(&mut resp)? == 0 {
             return Err(Error::Daemon("daemon closed the connection".into()));
         }
-        serde_json::from_str(&resp).map_err(|e| Error::Daemon(e.to_string()))
+        Ok(serde_json::from_str(&resp)?)
     }
 }

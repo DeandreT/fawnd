@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::controller::Controller;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
@@ -61,15 +61,16 @@ impl Profile {
     /// Load a profile from a TOML file.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path) -> Result<Profile> {
-        let text = std::fs::read_to_string(path).map_err(|e| Error::Config(e.to_string()))?;
-        toml::from_str(&text).map_err(|e| Error::Config(e.to_string()))
+        let text = std::fs::read_to_string(path)?;
+        Ok(toml::from_str(&text)?)
     }
 
     /// Save a profile to a TOML file.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self, path: &Path) -> Result<()> {
-        let text = toml::to_string_pretty(self).map_err(|e| Error::Config(e.to_string()))?;
-        std::fs::write(path, text).map_err(|e| Error::Config(e.to_string()))
+        let text = toml::to_string_pretty(self)?;
+        std::fs::write(path, text)?;
+        Ok(())
     }
 
     /// Apply this profile to the keyboard.

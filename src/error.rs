@@ -26,6 +26,20 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("TOML parse error: {0}")]
+    TomlDe(#[from] toml::de::Error),
+
+    #[error("TOML write error: {0}")]
+    TomlSer(#[from] toml::ser::Error),
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("D-Bus error: {0}")]
+    Dbus(#[from] zbus::Error),
+
     #[error("daemon: {0}")]
     Daemon(String),
 }

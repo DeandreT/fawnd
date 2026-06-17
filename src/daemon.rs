@@ -173,17 +173,16 @@ fn handle(req: Request, state: &mut State) -> Response {
             Ok(names) => Response::Profiles(names),
             Err(e) => Response::Error(e.to_string()),
         },
-        Request::ApplyProfile(name) => match load_profile(&name) {
-            Ok(profile) => match profile.apply(ctl) {
+        Request::ApplyProfile(name) => {
+            match load_profile(&name).and_then(|profile| profile.apply(ctl)) {
                 Ok(()) => {
                     tracing::info!("applied profile {name}");
                     state.active_profile = Some(name);
                     Response::Ok
                 }
                 Err(e) => Response::Error(e.to_string()),
-            },
-            Err(e) => Response::Error(e.to_string()),
-        },
+            }
+        }
         Request::SetActuationAll(mm) => {
             ctl.set_actuation_all(mm);
             into_response(ctl.flush_actuation(), &mut state.active_profile)
