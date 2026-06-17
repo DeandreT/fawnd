@@ -1,0 +1,19 @@
+# Example fawnd auto profile-switching rules.
+# Copy to ~/.config/fawnd/rules.toml and edit. Profiles referenced here must
+# exist in ~/.config/fawnd/profiles/<name>.toml.
+#
+# When the focused window changes, the daemon matches its app-id (KWin
+# resourceClass) against the rules below in order; the first match wins, and its
+# profile is applied. If nothing matches, `default` is used.
+
+default = "typing"
+
+# Steam games (app-id looks like "steam_app_730").
+[[rule]]
+match = "steam_app_*"
+profile = "gaming"
+
+# Windows games run via Proton/Wine.
+[[rule]]
+match = "*.exe"
+profile = "gaming"

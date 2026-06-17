@@ -1,59 +1,90 @@
 //! The fawnd daemon: sole owner of the keyboard, serving clients over IPC.
 //!
-//! Because the HID handle is single-threaded, the daemon services connections
-//! sequentially on one thread — the device is never shared. This also makes the
-//! daemon the single owner of the request/response depth stream, avoiding
-//! contention with a directly-connected GUI/CLI.
+//! The HID handle is single-threaded, so exactly one **device thread** owns the
+//! [`Controller`] and processes [`Job`]s from a channel. Everything else —
+//! per-connection IPC handlers and the focus watcher — are *producers* that send
+//! jobs and await a reply. This keeps device access serialized while allowing
+//! concurrent clients and background automation.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
+use std::thread;
 use std::time::Duration;
 
 use crate::config::Profile;
 use crate::controller::Controller;
 use crate::error::{Error, Result};
 use crate::ipc::{self, Request, Response, Status};
+use crate::rules;
+use crate::watch;
+
+/// A unit of work for the device thread: a request plus a reply channel.
+pub struct Job {
+    pub request: Request,
+    pub reply: Sender<Response>,
+}
 
 /// Directory holding `<name>.toml` profiles (`$XDG_CONFIG_HOME/fawnd/profiles`).
 pub fn profiles_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("fawnd")
-        .join("profiles")
+    rules::config_dir().join("profiles")
 }
 
-/// Mutable daemon state shared across requests.
+/// Mutable daemon state owned by the device thread.
 struct State {
     controller: Controller,
     active_profile: Option<String>,
 }
 
-/// Run the daemon: open the keyboard, bind the socket, and serve forever.
+/// Run the daemon: open the keyboard on a dedicated thread, start the optional
+/// focus watcher, and serve IPC connections.
 pub fn run() -> Result<()> {
     let path = ipc::socket_path();
-    // Remove a stale socket from a previous run (best effort).
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&path); // clear a stale socket (best effort)
     let listener = UnixListener::bind(&path)?;
-    tracing::info!("listening on {}", path.display());
 
-    let controller = Controller::open()?;
-    let id = controller.identity()?;
-    tracing::info!("device connected: {:?} fw {}", id.model, id.firmware_version);
+    let (job_tx, job_rx) = mpsc::channel::<Job>();
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<String>>();
 
-    let mut state = State {
-        controller,
-        active_profile: None,
+    // Device thread: owns the Controller and processes jobs serially.
+    thread::Builder::new()
+        .name("fawnd-device".into())
+        .spawn(move || device_loop(job_rx, ready_tx))?;
+
+    // Wait for the device to come up (or fail) before accepting clients.
+    match ready_rx.recv() {
+        Ok(Ok(desc)) => tracing::info!("device connected: {desc}"),
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err(Error::Daemon("device thread exited during startup".into())),
+    }
+
+    // Optional focus watcher for automatic profile switching.
+    let _watch = match watch::start(job_tx.clone()) {
+        Ok(Some(handle)) => {
+            tracing::info!("focus watcher active (auto profile switching)");
+            Some(handle)
+        }
+        Ok(None) => {
+            tracing::info!("no rules.toml — auto profile switching disabled");
+            None
+        }
+        Err(e) => {
+            tracing::warn!("focus watcher unavailable: {e}");
+            None
+        }
     };
 
+    tracing::info!("listening on {}", path.display());
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
-                if let Err(e) = serve_connection(stream, &mut state) {
-                    tracing::warn!("connection ended: {e}");
-                }
+                let job_tx = job_tx.clone();
+                thread::spawn(move || {
+                    if let Err(e) = serve_connection(stream, job_tx) {
+                        tracing::warn!("connection ended: {e}");
+                    }
+                });
             }
             Err(e) => tracing::warn!("accept failed: {e}"),
         }
@@ -61,7 +92,36 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn serve_connection(stream: UnixStream, state: &mut State) -> Result<()> {
+fn device_loop(job_rx: mpsc::Receiver<Job>, ready_tx: Sender<Result<String>>) {
+    let mut state = match Controller::open() {
+        Ok(controller) => match controller.identity() {
+            Ok(id) => {
+                let _ = ready_tx.send(Ok(format!("{:?} fw {}", id.model, id.firmware_version)));
+                State {
+                    controller,
+                    active_profile: None,
+                }
+            }
+            Err(e) => {
+                let _ = ready_tx.send(Err(e));
+                return;
+            }
+        },
+        Err(e) => {
+            let _ = ready_tx.send(Err(e));
+            return;
+        }
+    };
+
+    for job in job_rx {
+        let response = handle(job.request, &mut state);
+        let _ = job.reply.send(response);
+    }
+}
+
+/// Run one client connection: read newline-delimited requests, forward each to
+/// the device thread, and write back the response.
+fn serve_connection(stream: UnixStream, job_tx: Sender<Job>) -> Result<()> {
     let reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 
@@ -71,7 +131,7 @@ fn serve_connection(stream: UnixStream, state: &mut State) -> Result<()> {
             continue;
         }
         let response = match serde_json::from_str::<Request>(&line) {
-            Ok(req) => handle(req, state),
+            Ok(request) => dispatch(request, &job_tx),
             Err(e) => Response::Error(format!("bad request: {e}")),
         };
         let mut out = serde_json::to_string(&response)
@@ -83,8 +143,19 @@ fn serve_connection(stream: UnixStream, state: &mut State) -> Result<()> {
     Ok(())
 }
 
-/// Dispatch one request against the device. Device errors are returned to the
-/// client as [`Response::Error`] rather than dropping the connection.
+/// Send a request to the device thread and wait for its reply.
+pub fn dispatch(request: Request, job_tx: &Sender<Job>) -> Response {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    if job_tx.send(Job { request, reply: reply_tx }).is_err() {
+        return Response::Error("device thread is gone".into());
+    }
+    reply_rx
+        .recv()
+        .unwrap_or_else(|_| Response::Error("device thread dropped the reply".into()))
+}
+
+/// Execute one request against the device. Device errors are returned as
+/// [`Response::Error`] rather than dropping the connection.
 fn handle(req: Request, state: &mut State) -> Response {
     let ctl = &mut state.controller;
     match req {
@@ -120,12 +191,12 @@ fn handle(req: Request, state: &mut State) -> Response {
         Request::SetRapidTrigger {
             rapid_trigger,
             turbo,
-        } => into_response(ctl.set_rapid_trigger(rapid_trigger, turbo), &mut state.active_profile),
+        } => into_response(
+            ctl.set_rapid_trigger(rapid_trigger, turbo),
+            &mut state.active_profile,
+        ),
         Request::Reset => {
             let result = ctl.write_defaults();
-            if result.is_ok() {
-                state.active_profile = None;
-            }
             into_response(result, &mut state.active_profile)
         }
         Request::Depths => match ctl.poll_depths(Duration::from_millis(80)) {

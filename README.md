@@ -75,6 +75,36 @@ fawnd apply profile.toml        # apply a saved profile
 fawnd reset                     # restore defaults
 ```
 
+## Daemon & auto profile switching
+
+The daemon owns the keyboard and serves clients over a Unix socket; it also
+switches profiles automatically based on the focused window.
+
+```sh
+fawnd-daemon &                  # owns the device, serves the socket
+fawnd daemon status             # model / firmware / active profile
+fawnd daemon profiles           # list profiles in the store
+fawnd daemon apply gaming       # apply a stored profile
+```
+
+Profiles live in `~/.config/fawnd/profiles/<name>.toml`. Auto-switching is
+enabled by creating `~/.config/fawnd/rules.toml` (see
+[`rules.example.toml`](rules.example.toml)):
+
+```toml
+default = "typing"              # used when no rule matches
+
+[[rule]]
+match = "steam_app_*"          # glob on the window app-id; first match wins
+profile = "gaming"
+```
+
+On KDE/KWin (Wayland) there's no portable way to read the focused window's
+app-id, so the daemon loads a small KWin script that reports each window
+activation to a D-Bus service (`org.fawnd.Focus`); the daemon matches the app-id
+to a rule and applies the profile. Without `rules.toml`, auto-switching is simply
+off.
+
 ## Profile format
 
 ```toml
@@ -106,9 +136,14 @@ src/
 │   ├── worker.rs    background device thread (Command/Event channels)
 │   ├── app.rs       egui App: key grid + side-panel controls
 │   └── mod.rs       window setup / run()
+├── ipc.rs           daemon/client wire protocol (JSON over a Unix socket)
+├── daemon.rs        device-owning thread + job channel + IPC server
+├── rules.rs         app-id → profile rules (rules.toml)
+├── watch.rs         KWin focus watcher (zbus D-Bus service + KWin script)
 ├── lib.rs           library root
-├── main.rs          clap CLI         (bin: fawnd)
-└── bin/fawnd-gui.rs GUI entry point  (bin: fawnd-gui)
+├── main.rs          clap CLI            (bin: fawnd)
+├── bin/fawnd-gui.rs    GUI entry point   (bin: fawnd-gui)
+└── bin/fawnd-daemon.rs daemon entry      (bin: fawnd-daemon)
 ```
 
 ### Planned: daemon & IPC
@@ -151,9 +186,9 @@ behavior. See [Planned: daemon & IPC](#planned-daemon--ipc).
 - [x] `fawnd-daemon`: background process that owns the HID device, with a Unix
       socket + profile store (status / list / apply); CLI talks to it via
       `fawnd daemon …`. GUI-as-client still pending.
-- [ ] Per-app auto profile switching — push a profile based on the focused window
-      (KWin via D-Bus on Wayland; sway/Hyprland via their IPC; X11 via
-      `_NET_ACTIVE_WINDOW`)
+- [x] Per-app auto profile switching — focused-window → profile rules
+      (`rules.toml`), via a KWin script + D-Bus on KDE Wayland. sway/Hyprland and
+      X11 backends still pending.
 - [ ] Global hotkey profile cycling
 - [ ] Apply-on-hotplug — re-assert the active profile when the keyboard reconnects
       (wake, dock, KVM switch)

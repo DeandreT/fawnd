@@ -35,6 +35,8 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 # IPC wire format (newline-delimited JSON over a Unix socket).
 serde_json = "1.0"
+# D-Bus (focus watcher receives KWin window-activation callbacks).
+zbus = "5"
 # Errors.
 thiserror = "2.0"
 anyhow = "1.0"

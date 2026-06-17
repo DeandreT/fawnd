@@ -14,6 +14,8 @@ pub mod error;
 pub mod gui;
 pub mod ipc;
 pub mod protocol;
+pub mod rules;
+pub mod watch;
 
 pub use controller::Controller;
 pub use error::{Error, Result};
