@@ -139,7 +139,7 @@ impl Controller {
         let mut seen = [false; 3];
         let deadline = Instant::now() + timeout;
 
-        while !(seen[0] && seen[1] && seen[2]) {
+        while seen.contains(&false) {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 break;
@@ -164,7 +164,7 @@ impl Controller {
             seen[row] = true;
         }
 
-        Ok(seen.iter().any(|&s| s).then_some(frame))
+        Ok(seen.contains(&true).then_some(frame))
     }
 
     /// Restore factory-ish defaults: 2.0 mm actuation, rapid trigger off,

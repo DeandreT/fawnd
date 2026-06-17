@@ -222,16 +222,22 @@ fn handle(req: Request, state: &mut State) -> Response {
     }
 }
 
-/// A manual change clears the "active profile" label, since the live config no
-/// longer matches a stored profile.
-fn into_response(result: Result<()>, active: &mut Option<String>) -> Response {
-    match result {
-        Ok(()) => {
-            *active = None;
-            Response::Ok
+impl From<Result<()>> for Response {
+    fn from(result: Result<()>) -> Response {
+        match result {
+            Ok(()) => Response::Ok,
+            Err(e) => Response::Error(e.to_string()),
         }
-        Err(e) => Response::Error(e.to_string()),
     }
+}
+
+/// Apply a unit result, clearing the "active profile" label on success since the
+/// live config no longer matches a stored profile.
+fn into_response(result: Result<()>, active: &mut Option<String>) -> Response {
+    if result.is_ok() {
+        *active = None;
+    }
+    result.into()
 }
 
 fn list_profiles() -> Result<Vec<String>> {
