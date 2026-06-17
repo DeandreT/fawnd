@@ -61,6 +61,8 @@ enum DaemonCommand {
         /// Profile name (without the .toml extension).
         name: String,
     },
+    /// Press keys to print their device slot index (for mapping the layout).
+    Identify,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -120,10 +122,16 @@ fn main() -> anyhow::Result<()> {
 
 fn run_daemon_client(command: DaemonCommand) -> anyhow::Result<()> {
     let mut client = ipc::Client::connect()?;
+
+    if let DaemonCommand::Identify = command {
+        return identify_loop(&mut client);
+    }
+
     let response = match command {
         DaemonCommand::Status => client.request(&Request::Status)?,
         DaemonCommand::Profiles => client.request(&Request::ListProfiles)?,
         DaemonCommand::Apply { name } => client.request(&Request::ApplyProfile(name))?,
+        DaemonCommand::Identify => unreachable!("handled above"),
     };
 
     match response {
@@ -151,4 +159,28 @@ fn run_daemon_client(command: DaemonCommand) -> anyhow::Result<()> {
         Response::Error(e) => anyhow::bail!("daemon error: {e}"),
     }
     Ok(())
+}
+
+/// Stream pressed keys and print their device slot index, for mapping the
+/// physical layout. Press each key firmly; release between presses.
+fn identify_loop(client: &mut ipc::Client) -> anyhow::Result<()> {
+    use fawnd::protocol::consts::TOTAL_KEYS;
+    use fawnd::protocol::layout::name_of;
+
+    println!("Press keys to identify their device slot (Ctrl-C to quit).");
+    let mut down = [false; TOTAL_KEYS];
+    loop {
+        if let Response::Depths(values) = client.request(&Request::Depths)? {
+            for (i, &v) in values.iter().enumerate() {
+                if v >= 15 && !down[i] {
+                    down[i] = true;
+                    let label = name_of(i).unwrap_or("(unmapped)");
+                    println!("slot {i:>3}  {label:<10}  {:.1} mm", v as f32 / 10.0);
+                } else if v < 7 && down[i] {
+                    down[i] = false;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(8));
+    }
 }

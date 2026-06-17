@@ -1,5 +1,6 @@
 //! The egui application: a visual keyboard plus side-panel controls.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use eframe::CreationContext;
@@ -8,19 +9,52 @@ use egui::{
     vec2,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::config::Profile;
-use crate::controller::DEPTH_MAX_RAW;
 use crate::ipc::Status;
 use crate::protocol::consts::{ACTUATION_MAX, ACTUATION_MIN, LedSequence, TOTAL_KEYS};
-use crate::protocol::layout::{self, KEYBOARD_LAYOUT, WASD_KEYS};
+use crate::protocol::layout::{self, WASD_KEYS};
 
 use super::worker::{Command, Event, Worker};
 
-/// The device matrix is 6 rows × 21 columns.
-const COLS: usize = 21;
-const ROWS: usize = 6;
-/// Column where the right-hand key cluster begins.
-const CLUSTER_COL: usize = 14;
+/// A visual key: a device-slot name (empty = gap) and its width in key units.
+type Vk = (&'static str, f32);
+
+/// Hand-authored A75 (75% ANSI) layout for the main block, in key units. Names
+/// map to device slots via [`layout::index_of`].
+#[rustfmt::skip]
+const MAIN_ROWS: &[&[Vk]] = &[
+    &[("ESC", 1.0), ("", 0.5),
+      ("F1", 1.0), ("F2", 1.0), ("F3", 1.0), ("F4", 1.0), ("", 0.5),
+      ("F5", 1.0), ("F6", 1.0), ("F7", 1.0), ("F8", 1.0), ("", 0.5),
+      ("F9", 1.0), ("F10", 1.0), ("F11", 1.0), ("F12", 1.0)],
+    &[("TILDE", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0),
+      ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0),
+      ("MINUS", 1.0), ("PLUS", 1.0), ("BACK", 2.0)],
+    &[("TAB", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0),
+      ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0),
+      ("BRKTS_L", 1.0), ("BRKTS_R", 1.0), ("SLASH_K29", 1.5)],
+    &[("CAPS", 1.75), ("A", 1.0), ("S", 1.0), ("D", 1.0), ("F", 1.0), ("G", 1.0),
+      ("H", 1.0), ("J", 1.0), ("K", 1.0), ("L", 1.0), ("COLON", 1.0),
+      ("QOTATN", 1.0), ("RETURN", 2.25)],
+    &[("SHF_L", 2.25), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0),
+      ("N", 1.0), ("M", 1.0), ("COMMA", 1.0), ("PERIOD", 1.0), ("SLASH", 1.0),
+      ("SHF_R", 2.75)],
+    &[("CTRL_L", 1.25), ("WIN_L", 1.25), ("ALT_L", 1.25), ("SPACE", 6.25),
+      ("ALT_R", 1.25), ("FN1", 1.25), ("APP", 1.25)],
+];
+
+/// Right-hand nav column + inverted-T arrow cluster, aligned row-for-row with
+/// [`MAIN_ROWS`]. `ARR_UP` is offset to sit above `ARR_DW` (down).
+#[rustfmt::skip]
+const RIGHT_ROWS: &[&[Vk]] = &[
+    &[("HOME", 1.0)],
+    &[("PGUP", 1.0)],
+    &[("PGDN", 1.0)],
+    &[("END", 1.0)],
+    &[("", 1.0), ("ARR_UP", 1.0)],
+    &[("ARR_L", 1.0), ("ARR_DW", 1.0), ("ARR_R", 1.0)],
+];
 
 const MM_MIN: f32 = ACTUATION_MIN as f32 / 10.0;
 const MM_MAX: f32 = ACTUATION_MAX as f32 / 10.0;
@@ -29,6 +63,8 @@ const MM_MAX: f32 = ACTUATION_MAX as f32 / 10.0;
 const KEY_U: f32 = 40.0;
 const KEY_H: f32 = 48.0;
 const KEY_GAP: f32 = 5.0;
+/// Approximate maximum travel reading from the key-depth stream (about 4.0 mm).
+const DEPTH_MAX_RAW: u8 = 40;
 
 // ── palette ─────────────────────────────────────────────────────────────
 const BG: Color32 = Color32::from_rgb(0x16, 0x18, 0x1e);
@@ -136,6 +172,7 @@ impl App {
         });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_profile(&mut self, profile: &Profile) {
         self.actuation.fill(profile.actuation);
         for (name, mm) in &profile.keys {
@@ -148,6 +185,7 @@ impl App {
         self.global_mm = profile.actuation;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn build_profile(&self) -> Profile {
         let mut profile = Profile {
             actuation: self.global_mm,
@@ -307,29 +345,7 @@ impl App {
                         }
                     });
 
-                    card(ui, "Profile", |ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button("Load…").clicked() {
-                                if let Some(path) = pick_open() {
-                                    match Profile::load(&path) {
-                                        Ok(p) => {
-                                            self.load_profile(&p);
-                                            self.status = format!("Loaded {}", path.display());
-                                        }
-                                        Err(e) => self.status = format!("Load failed: {e}"),
-                                    }
-                                }
-                            }
-                            if ui.button("Save…").clicked() {
-                                if let Some(path) = pick_save() {
-                                    match self.build_profile().save(&path) {
-                                        Ok(()) => self.status = format!("Saved {}", path.display()),
-                                        Err(e) => self.status = format!("Save failed: {e}"),
-                                    }
-                                }
-                            }
-                        });
-                    });
+                    self.profile_card(ui);
 
                     ui.add_space(4.0);
                     if accent_button(ui, "⏏  Apply to keyboard", true).clicked() {
@@ -345,23 +361,60 @@ impl App {
             });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn profile_card(&mut self, ui: &mut egui::Ui) {
+        card(ui, "Profile", |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Load...").clicked() {
+                    if let Some(path) = pick_open() {
+                        match Profile::load(&path) {
+                            Ok(p) => {
+                                self.load_profile(&p);
+                                self.status = format!("Loaded {}", path.display());
+                            }
+                            Err(e) => self.status = format!("Load failed: {e}"),
+                        }
+                    }
+                }
+                if ui.button("Save...").clicked() {
+                    if let Some(path) = pick_save() {
+                        match self.build_profile().save(&path) {
+                            Ok(()) => self.status = format!("Saved {}", path.display()),
+                            Err(e) => self.status = format!("Save failed: {e}"),
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn profile_card(&mut self, ui: &mut egui::Ui) {
+        card(ui, "Profile", |ui| {
+            ui.label(
+                RichText::new("Profile file load/save is available in the native app.")
+                    .color(TEXT_DIM),
+            );
+        });
+    }
+
     fn key_grid(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(BG).inner_margin(Margin::same(16)))
             .show_inside(ui, |ui| {
                 egui::ScrollArea::both().show(ui, |ui| {
                     ui.horizontal_top(|ui| {
-                        // Main cluster (columns 0..CLUSTER_COL).
+                        // Main block.
                         ui.vertical(|ui| {
-                            for row in 0..ROWS {
-                                self.key_row(ui, row, 0, CLUSTER_COL);
+                            for row in MAIN_ROWS {
+                                self.visual_row(ui, row);
                             }
                         });
-                        ui.add_space(18.0);
-                        // Right cluster (columns CLUSTER_COL..CLUSTER_COL+3).
+                        ui.add_space(22.0);
+                        // Nav column + arrow cluster.
                         ui.vertical(|ui| {
-                            for row in 0..ROWS {
-                                self.key_row(ui, row, CLUSTER_COL, CLUSTER_COL + 3);
+                            for row in RIGHT_ROWS {
+                                self.visual_row(ui, row);
                             }
                         });
                     });
@@ -372,23 +425,27 @@ impl App {
             });
     }
 
-    fn key_row(&mut self, ui: &mut egui::Ui, row: usize, from: usize, to: usize) {
+    fn visual_row(&mut self, ui: &mut egui::Ui, row: &[Vk]) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = KEY_GAP;
-            for col in from..to {
-                let idx = row * COLS + col;
-                let name = KEYBOARD_LAYOUT[idx];
-                if name.is_empty() {
-                    ui.allocate_space(vec2(KEY_U * 0.32, KEY_H));
-                    continue;
-                }
-                self.key_cap(ui, idx, name);
+            for &(name, width) in row {
+                self.visual_key(ui, name, width);
             }
         });
     }
 
-    fn key_cap(&mut self, ui: &mut egui::Ui, idx: usize, name: &str) {
-        let size = vec2(KEY_U * key_width(name), KEY_H);
+    fn visual_key(&mut self, ui: &mut egui::Ui, name: &str, width: f32) {
+        let size = vec2(KEY_U * width, KEY_H);
+        // Gaps, or keys this device doesn't have, just reserve space.
+        if name.is_empty() {
+            ui.allocate_space(size);
+            return;
+        }
+        let Some(idx) = layout::index_of(name) else {
+            ui.allocate_space(size);
+            return;
+        };
+
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         if !ui.is_rect_visible(rect) {
             return;
@@ -672,20 +729,6 @@ fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
 }
 
-fn key_width(name: &str) -> f32 {
-    match name {
-        "BACK" => 2.0,
-        "TAB" | "SLASH_K29" => 1.5,
-        "CAPS" => 1.8,
-        "RETURN" => 2.25,
-        "SHF_L" => 2.25,
-        "SHF_R" => 1.75,
-        "CTRL_L" | "WIN_L" | "ALT_L" | "ALT_R" | "FN1" | "APP" | "CTRL_R" => 1.25,
-        "SPACE" => 6.25,
-        _ => 1.0,
-    }
-}
-
 /// Friendlier on-cap labels for the device's terse key names.
 fn short_label(name: &str) -> &str {
     match name {
@@ -715,9 +758,12 @@ fn short_label(name: &str) -> &str {
         "ARR_DW" => "Dn",
         "ARR_L" => "Lt",
         "ARR_R" => "Rt",
-        "NUMS" => "Num",
-        "KP_DEL" => "Del",
-        other => other.strip_prefix("KP").unwrap_or(other),
+        "HOME" => "Home",
+        "PGUP" => "PgUp",
+        "PGDN" => "PgDn",
+        "END" => "End",
+        "DEL" => "Del",
+        other => other,
     }
 }
 
@@ -729,12 +775,14 @@ fn sequence_name(seq: LedSequence) -> &'static str {
         .unwrap_or("Custom")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn pick_open() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("TOML profile", &["toml"])
         .pick_file()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn pick_save() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("TOML profile", &["toml"])

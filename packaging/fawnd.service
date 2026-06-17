@@ -1,0 +1,17 @@
+[Unit]
+Description=fawnd — DrunkDeer A75 keyboard daemon
+Documentation=https://github.com/DeandreT/fawnd
+# Order after the graphical session so KWin / the session bus are available for
+# the focus watcher (the daemon still runs fine if they aren't).
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/fawnd-daemon
+# Keep retrying if the keyboard isn't plugged in yet (or is unplugged).
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=fawnd=info
+
+[Install]
+WantedBy=default.target

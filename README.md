@@ -1,9 +1,10 @@
 # fawnd
 
 A userspace driver for the **DrunkDeer A75** Hall-effect (magnetic switch)
-keyboard, with a CLI, an egui GUI, and a background daemon. Configure per-key
-actuation points, rapid trigger / turbo (snap-tap), and lighting; watch live key
-depth; and switch profiles automatically based on the focused window.
+keyboard, with a CLI, an egui GUI (native or in the browser via WebHID), and a
+background daemon. Configure per-key actuation points, rapid trigger / turbo
+(snap-tap), and lighting; watch live key depth; and switch profiles automatically
+based on the focused window.
 
 ## What it talks to
 
@@ -69,6 +70,21 @@ background worker thread, so the UI never blocks) rather than opening the device
 itself. Start `fawnd-daemon` first; if it isn't running the GUI shows "offline"
 with a Reconnect button.
 
+### Browser build (experimental)
+
+The same GUI compiles to WebAssembly and talks to the keyboard directly through
+[WebHID](https://developer.mozilla.org/docs/Web/API/WebHID_API) — there's no
+daemon in the browser, since a web page can't reach the Unix socket. Build and
+serve with [Trunk](https://trunkrs.dev):
+
+```sh
+rustup target add wasm32-unknown-unknown
+trunk serve            # open the printed localhost URL in a Chromium browser
+```
+
+WebHID is only available in Chromium-based browsers over `https`/`localhost`, and
+you must grant device access when prompted.
+
 ## CLI
 
 ```sh
@@ -94,6 +110,7 @@ fawnd-daemon &                  # owns the device, serves the socket
 fawnd daemon status             # model / firmware / active profile
 fawnd daemon profiles           # list profiles in the store
 fawnd daemon apply gaming       # apply a stored profile
+fawnd daemon identify           # press keys to print their device slot
 ```
 
 Profiles live in `~/.config/fawnd/profiles/<name>.toml`. Auto-switching is
@@ -113,6 +130,28 @@ app-id, so the daemon loads a small KWin script that reports each window
 activation to a D-Bus service (`org.fawnd.Focus`); the daemon matches the app-id
 to a rule and applies the profile. Without `rules.toml`, auto-switching is simply
 off.
+
+### Run at login (systemd)
+
+Install the daemon as a `systemd --user` service that starts automatically at
+login:
+
+```sh
+./scripts/install-service.sh
+```
+
+This builds release binaries into `~/.local/bin`, installs a hidraw udev rule
+(via `sudo`), and enables the `fawnd` user service
+([`packaging/fawnd.service`](packaging/fawnd.service)). Manage it with:
+
+```sh
+systemctl --user status fawnd
+journalctl --user -u fawnd -f
+systemctl --user disable --now fawnd     # uninstall the service
+```
+
+The service starts when you log in. To keep it running across logouts, enable
+lingering: `loginctl enable-linger "$USER"`.
 
 ## Profile format
 
@@ -137,23 +176,30 @@ src/
 │   ├── layout.rs    126-slot key map + name<->index
 │   ├── packet.rs    payload builders + mm<->byte codec
 │   └── mod.rs       Model / Identity parsing
-├── device.rs        HID discovery + raw report read/write + handshake
-├── controller.rs    high-level per-key + global config, state mirror
+├── device.rs        HID discovery + raw report read/write + handshake   [native]
+├── controller.rs    high-level per-key + global config, state mirror     [native]
 ├── config.rs        TOML profiles (load/save/apply)
 ├── error.rs         error type
-├── gui/             egui UI
-│   ├── worker.rs    background IPC client thread (Command/Event channels)
-│   ├── app.rs       egui App: key grid + side-panel controls
-│   └── mod.rs       window setup / run()
+├── gui/             egui UI (renders an A75 75% layout)
+│   ├── worker.rs     background IPC client thread (Command/Event channels) [native]
+│   ├── worker_web.rs WebHID worker, same Command/Event API                 [wasm]
+│   ├── app.rs        egui App: key grid + side-panel controls
+│   └── mod.rs        window setup / run()
 ├── ipc.rs           daemon/client wire protocol (JSON over a Unix socket)
-├── daemon.rs        device-owning thread + job channel + IPC server
-├── rules.rs         app-id → profile rules (rules.toml)
-├── watch.rs         KWin focus watcher (zbus D-Bus service + KWin script)
+├── daemon.rs        device-owning thread + job channel + IPC server      [native]
+├── rules.rs         app-id → profile rules (rules.toml)                  [native]
+├── watch.rs         KWin focus watcher (zbus D-Bus service + KWin script) [native]
 ├── lib.rs           library root
-├── main.rs          clap CLI            (bin: fawnd)
-├── bin/fawnd-gui.rs    GUI entry point   (bin: fawnd-gui)
-└── bin/fawnd-daemon.rs daemon entry      (bin: fawnd-daemon)
+├── main.rs          clap CLI               (bin: fawnd, native)
+├── bin/fawnd-gui.rs    native GUI entry     (bin: fawnd-gui)
+├── bin/fawnd-daemon.rs daemon entry         (bin: fawnd-daemon, native)
+└── bin/fawnd-web.rs    browser entry (wasm) (bin: fawnd-web)
 ```
+
+`protocol`, `config`, `ipc` (types), and the egui `app` are platform-agnostic and
+shared by the native and wasm builds; device/daemon/CLI pieces are gated
+`#[cfg(not(target_arch = "wasm32"))]`. The web front-end (`web/index.html`,
+`Trunk.toml`) is built with Trunk.
 
 ### Daemon & IPC
 

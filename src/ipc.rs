@@ -3,12 +3,16 @@
 //! The wire format is newline-delimited JSON over a Unix domain socket: one
 //! [`Request`] per line in, one [`Response`] per line out.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::os::unix::net::UnixStream;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::{Error, Result};
 use crate::protocol::consts::LedSequence;
 
@@ -16,6 +20,7 @@ use crate::protocol::consts::LedSequence;
 ///
 /// Prefers `$XDG_RUNTIME_DIR/fawnd.sock` (per-user, cleaned up on logout),
 /// falling back to the system temp dir.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn socket_path() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -73,11 +78,13 @@ pub struct Status {
 }
 
 /// A connected client handle.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Client {
     writer: UnixStream,
     reader: BufReader<UnixStream>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Client {
     /// Connect to the running daemon, or error if it isn't running.
     pub fn connect() -> Result<Client> {

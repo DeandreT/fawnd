@@ -5,41 +5,65 @@ edition = "2024"
 description = "A userspace driver and CLI for the DrunkDeer A75 Hall-effect keyboard"
 license = "MIT"
 
+[features]
+default = ["native"]
+native = []
+
 [lib]
 name = "fawnd"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "fawnd"
 path = "src/main.rs"
+required-features = ["native"]
 
 [[bin]]
 name = "fawnd-gui"
 path = "src/bin/fawnd-gui.rs"
+required-features = ["native"]
 
 [[bin]]
 name = "fawnd-daemon"
 path = "src/bin/fawnd-daemon.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "fawnd-web"
+path = "src/bin/fawnd-web.rs"
 
 [dependencies]
 # GUI.
 eframe = "0.34"
 egui = "0.34"
+# Config / profile (de)serialization.
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+# Errors.
+thiserror = "2.0"
+# Logging.
+tracing = "0.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native file dialogs.
 rfd = "0.17"
 # HID transport. `hidapi` wraps the system hidraw/libusb backend.
 hidapi = "2.6"
 # CLI parsing.
 clap = { version = "4.5", features = ["derive"] }
-# Config / profile (de)serialization.
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
 # IPC wire format (newline-delimited JSON over a Unix socket).
 serde_json = "1.0"
 # D-Bus (focus watcher receives KWin window-activation callbacks).
 zbus = "5"
 # Errors.
-thiserror = "2.0"
 anyhow = "1.0"
 # Logging.
-tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window", "console"] }

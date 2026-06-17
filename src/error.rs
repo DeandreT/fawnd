@@ -4,10 +4,14 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("HID error: {0}")]
     Hid(#[from] hidapi::HidError),
 
-    #[error("no DrunkDeer keyboard found (looked for vendor {:#06x})", crate::protocol::consts::VENDOR_ID)]
+    #[error(
+        "no DrunkDeer keyboard found (looked for vendor {:#06x})",
+        crate::protocol::consts::VENDOR_ID
+    )]
     DeviceNotFound,
 
     #[error("device did not respond to identity handshake")]

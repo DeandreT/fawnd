@@ -5,9 +5,14 @@
 //! [`worker::Worker`] thread and the UI exchanges plain data with it.
 
 mod app;
+#[cfg(not(target_arch = "wasm32"))]
+mod worker;
+#[cfg(target_arch = "wasm32")]
+#[path = "worker_web.rs"]
 mod worker;
 
 /// Launch the native configuration window.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -22,4 +27,11 @@ pub fn run() -> eframe::Result<()> {
         options,
         Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn app_creator(
+    cc: &eframe::CreationContext<'_>,
+) -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(Box::new(app::App::new(cc)))
 }
