@@ -59,18 +59,14 @@ pub fn run() -> Result<()> {
         Err(_) => return Err(Error::Daemon("device thread exited during startup".into())),
     }
 
-    // Optional focus watcher for automatic profile switching.
+    // Focus watcher + cycle-profile hotkey (KWin). Non-fatal if unavailable.
     let _watch = match watch::start(job_tx.clone()) {
-        Ok(Some(handle)) => {
-            tracing::info!("focus watcher active (auto profile switching)");
+        Ok(handle) => {
+            tracing::info!("focus watcher + cycle-profile hotkey active");
             Some(handle)
         }
-        Ok(None) => {
-            tracing::info!("no rules.toml — auto profile switching disabled");
-            None
-        }
         Err(e) => {
-            tracing::warn!("focus watcher unavailable: {e}");
+            tracing::warn!("watcher unavailable: {e}");
             None
         }
     };
@@ -159,30 +155,19 @@ pub fn dispatch(request: Request, job_tx: &Sender<Job>) -> Response {
 fn handle(req: Request, state: &mut State) -> Response {
     let ctl = &mut state.controller;
     match req {
-        Request::Status => match ctl.identity() {
-            Ok(id) => Response::Status(Status {
-                model: format!("{:?}", id.model),
-                firmware: id.firmware_version,
-                rapid_trigger: id.rapid_trigger,
-                turbo: id.turbo,
-                active_profile: state.active_profile.clone(),
-            }),
-            Err(e) => Response::Error(e.to_string()),
-        },
+        Request::Status => status_response(ctl, &state.active_profile),
         Request::ListProfiles => match list_profiles() {
             Ok(names) => Response::Profiles(names),
             Err(e) => Response::Error(e.to_string()),
         },
-        Request::ApplyProfile(name) => {
-            match load_profile(&name).and_then(|profile| profile.apply(ctl)) {
-                Ok(()) => {
-                    tracing::info!("applied profile {name}");
-                    state.active_profile = Some(name);
-                    Response::Ok
-                }
+        Request::ApplyProfile(name) => apply_named(ctl, name, &mut state.active_profile).into(),
+        Request::CycleProfile => match next_profile_name(&state.active_profile) {
+            Ok(name) => match apply_named(ctl, name, &mut state.active_profile) {
+                Ok(()) => status_response(ctl, &state.active_profile),
                 Err(e) => Response::Error(e.to_string()),
-            }
-        }
+            },
+            Err(e) => Response::Error(e.to_string()),
+        },
         Request::SetActuationAll(mm) => {
             ctl.set_actuation_all(mm);
             into_response(ctl.flush_actuation(), &mut state.active_profile)
@@ -238,6 +223,43 @@ fn into_response(result: Result<()>, active: &mut Option<String>) -> Response {
         *active = None;
     }
     result.into()
+}
+
+/// Build a [`Response::Status`] from the device, or an error response.
+fn status_response(ctl: &Controller, active_profile: &Option<String>) -> Response {
+    match ctl.identity() {
+        Ok(id) => Response::Status(Status {
+            model: format!("{:?}", id.model),
+            firmware: id.firmware_version,
+            rapid_trigger: id.rapid_trigger,
+            turbo: id.turbo,
+            active_profile: active_profile.clone(),
+        }),
+        Err(e) => Response::Error(e.to_string()),
+    }
+}
+
+/// Load and apply a named profile, recording it as the active profile.
+fn apply_named(ctl: &mut Controller, name: String, active: &mut Option<String>) -> Result<()> {
+    load_profile(&name).and_then(|profile| profile.apply(ctl))?;
+    tracing::info!("applied profile {name}");
+    *active = Some(name);
+    Ok(())
+}
+
+/// The profile to switch to when cycling: the one after `active` in sorted order
+/// (wrapping), or the first if there's no/unknown active profile.
+fn next_profile_name(active: &Option<String>) -> Result<String> {
+    let names = list_profiles()?;
+    if names.is_empty() {
+        return Err(Error::Config("no profiles to cycle".into()));
+    }
+    let next = active
+        .as_ref()
+        .and_then(|a| names.iter().position(|n| n == a))
+        .map(|i| (i + 1) % names.len())
+        .unwrap_or(0);
+    Ok(names[next].clone())
 }
 
 fn list_profiles() -> Result<Vec<String>> {

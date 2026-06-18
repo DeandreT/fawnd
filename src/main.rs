@@ -61,6 +61,8 @@ enum DaemonCommand {
         /// Profile name (without the .toml extension).
         name: String,
     },
+    /// Apply the next profile in the store (wrapping).
+    Cycle,
     /// Press keys to print their device slot index (for mapping the layout).
     Identify,
 }
@@ -131,6 +133,7 @@ fn run_daemon_client(command: DaemonCommand) -> anyhow::Result<()> {
         DaemonCommand::Status => client.request(&Request::Status)?,
         DaemonCommand::Profiles => client.request(&Request::ListProfiles)?,
         DaemonCommand::Apply { name } => client.request(&Request::ApplyProfile(name))?,
+        DaemonCommand::Cycle => client.request(&Request::CycleProfile)?,
         DaemonCommand::Identify => unreachable!("handled above"),
     };
 

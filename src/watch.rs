@@ -1,10 +1,13 @@
-//! Focus watcher: drives automatic profile switching from the active window.
+//! KWin integration: focus-based auto profile switching and a cycle-profile
+//! global shortcut.
 //!
 //! On KDE/KWin (Wayland) there is no portable API to read the focused window's
-//! app-id, so we go through KWin's scripting engine: a small JS script connects
-//! to `workspace.windowActivated` and pushes each activation's `resourceClass`
-//! to a D-Bus service this module exposes. Incoming activations are matched
-//! against [`Rules`] and applied via the daemon's job channel.
+//! app-id or to register a global shortcut from outside the compositor, so we go
+//! through KWin's scripting engine: a small JS script connects to
+//! `workspace.windowActivated` and registers a shortcut, and both call back into
+//! a D-Bus service this module exposes. Activations are matched against
+//! [`Rules`]; the shortcut cycles profiles. Both act via the daemon's job
+//! channel.
 
 use std::process::Command;
 use std::sync::mpsc::Sender;
@@ -18,7 +21,8 @@ const DBUS_NAME: &str = "org.fawnd.Focus";
 const DBUS_PATH: &str = "/Focus";
 const KWIN_SCRIPT_NAME: &str = "fawnd";
 
-/// KWin JS: report the active window's resource class to our D-Bus service.
+/// KWin JS: report the active window's resource class to our D-Bus service, and
+/// register a global shortcut that cycles the keyboard profile.
 const KWIN_SCRIPT: &str = r#"
 function report(w) {
     if (w && w.resourceClass) {
@@ -30,6 +34,10 @@ workspace.windowActivated.connect(report);
 if (workspace.activeWindow) {
     report(workspace.activeWindow);
 }
+registerShortcut("Fawnd Cycle Profile", "Fawnd: cycle keyboard profile",
+                 "Meta+Shift+P", function() {
+    callDBus("org.fawnd.Focus", "/Focus", "org.fawnd.Focus", "CycleProfile");
+});
 "#;
 
 /// Live focus watcher. Keep it alive for the daemon's lifetime; dropping it
@@ -38,10 +46,13 @@ pub struct Watcher {
     _conn: zbus::blocking::Connection,
 }
 
-/// D-Bus object receiving window activations from the KWin script.
+/// D-Bus object the KWin script talks to: window activations and the
+/// cycle-profile shortcut.
 struct FocusService {
     job_tx: Sender<Job>,
-    rules: Rules,
+    /// `None` when no `rules.toml` exists — auto-switching is off, but the
+    /// cycle-profile hotkey still works.
+    rules: Option<Rules>,
     current: Option<String>,
 }
 
@@ -49,7 +60,10 @@ struct FocusService {
 impl FocusService {
     /// Called by the KWin script whenever the focused window changes.
     fn activated(&mut self, app_id: String) {
-        let Some(profile) = self.rules.profile_for(&app_id).map(str::to_owned) else {
+        let Some(rules) = self.rules.as_ref() else {
+            return;
+        };
+        let Some(profile) = rules.profile_for(&app_id).map(str::to_owned) else {
             return;
         };
         if self.current.as_deref() == Some(profile.as_str()) {
@@ -61,14 +75,28 @@ impl FocusService {
             other => tracing::warn!("auto-switch to '{profile}' failed: {other:?}"),
         }
     }
+
+    /// Called by the cycle-profile global shortcut.
+    fn cycle_profile(&mut self) {
+        match daemon::dispatch(Request::CycleProfile, &self.job_tx) {
+            Response::Status(status) => {
+                if let Some(profile) = &status.active_profile {
+                    tracing::info!("hotkey: cycled to profile '{profile}'");
+                }
+                self.current = status.active_profile;
+            }
+            other => tracing::warn!("cycle profile failed: {other:?}"),
+        }
+    }
 }
 
-/// Start the focus watcher if rules are configured. Returns `Ok(None)` when no
-/// `rules.toml` exists (auto-switching simply disabled).
-pub fn start(job_tx: Sender<Job>) -> Result<Option<Watcher>> {
-    let Some(rules) = Rules::load()? else {
-        return Ok(None);
-    };
+/// Start the focus watcher and cycle-profile hotkey. Auto profile switching is
+/// active only when a `rules.toml` exists; the hotkey works regardless.
+pub fn start(job_tx: Sender<Job>) -> Result<Watcher> {
+    let rules = Rules::load()?;
+    if rules.is_none() {
+        tracing::info!("no rules.toml — auto profile switching off (hotkey still active)");
+    }
 
     let service = FocusService {
         job_tx,
@@ -83,7 +111,7 @@ pub fn start(job_tx: Sender<Job>) -> Result<Option<Watcher>> {
 
     install_kwin_script()?;
 
-    Ok(Some(Watcher { _conn: conn }))
+    Ok(Watcher { _conn: conn })
 }
 
 /// Write the KWin script and (re)load it into the running compositor.

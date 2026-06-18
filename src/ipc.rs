@@ -37,6 +37,8 @@ pub enum Request {
     ListProfiles,
     /// Apply a named profile from the store.
     ApplyProfile(String),
+    /// Apply the next profile in the store (wrapping), for hotkey cycling.
+    CycleProfile,
     /// Set the actuation point (mm) for every key.
     SetActuationAll(f32),
     /// Set a full per-key actuation map (mm), length [`crate::protocol::consts::TOTAL_KEYS`].

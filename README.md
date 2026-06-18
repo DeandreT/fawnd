@@ -110,8 +110,14 @@ fawnd-daemon &                  # owns the device, serves the socket
 fawnd daemon status             # model / firmware / active profile
 fawnd daemon profiles           # list profiles in the store
 fawnd daemon apply gaming       # apply a stored profile
+fawnd daemon cycle              # switch to the next profile (wrapping)
 fawnd daemon identify           # press keys to print their device slot
 ```
+
+`fawnd daemon cycle` is handy to bind to a hotkey. On KDE the daemon also
+registers a global shortcut (**Meta+Shift+P** by default, rebindable in *System
+Settings → Shortcuts → KWin Scripts*) that cycles profiles. On other compositors,
+bind `fawnd daemon cycle` with your own hotkey daemon (e.g. sway `bindsym`).
 
 Profiles live in `~/.config/fawnd/profiles/<name>.toml`. Auto-switching is
 enabled by creating `~/.config/fawnd/rules.toml` (see
@@ -188,7 +194,7 @@ src/
 ├── ipc.rs           daemon/client wire protocol (JSON over a Unix socket)
 ├── daemon.rs        device-owning thread + job channel + IPC server      [native]
 ├── rules.rs         app-id → profile rules (rules.toml)                  [native]
-├── watch.rs         KWin focus watcher (zbus D-Bus service + KWin script) [native]
+├── watch.rs         KWin focus watcher + cycle hotkey (zbus + KWin script) [native]
 ├── lib.rs           library root
 ├── main.rs          clap CLI               (bin: fawnd, native)
 ├── bin/fawnd-gui.rs    native GUI entry     (bin: fawnd-gui)
@@ -221,8 +227,9 @@ stream.
 - `daemon`: a device-owning thread processes jobs from a channel; per-connection
   handlers and the watcher are producers, so device access stays serialized.
 - `ipc`: shared request/response types + the `Client` used by CLI and GUI.
-- `watch`: focus watcher (KWin via D-Bus today; sway/Hyprland/X11 planned).
-  Hotkey and hotplug sources are planned.
+- `watch`: KWin focus watcher + cycle-profile global shortcut, both via a KWin
+  script that calls back over D-Bus (sway/Hyprland/X11 focus and apply-on-hotplug
+  are planned).
 
 ## Roadmap
 
@@ -242,7 +249,8 @@ behavior. See [Daemon & IPC](#daemon--ipc).
 - [x] Per-app auto profile switching — focused-window → profile rules
       (`rules.toml`), via a KWin script + D-Bus on KDE Wayland. sway/Hyprland and
       X11 backends still pending.
-- [ ] Global hotkey profile cycling
+- [x] Global hotkey profile cycling — `fawnd daemon cycle` + a KWin global
+      shortcut (Meta+Shift+P)
 - [ ] Apply-on-hotplug — re-assert the active profile when the keyboard reconnects
       (wake, dock, KVM switch)
 - [ ] IPC API exposing the live key-depth stream + current state to other tools
