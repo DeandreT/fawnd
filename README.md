@@ -75,7 +75,7 @@ with a Reconnect button.
 The same GUI compiles to WebAssembly and talks to the keyboard directly through
 [WebHID](https://developer.mozilla.org/docs/Web/API/WebHID_API) — there's no
 daemon in the browser, since a web page can't reach the Unix socket. Build and
-serve with [Trunk](https://trunkrs.dev):
+serve with [Trunk](https://trunk-rs.github.io/trunk/):
 
 ```sh
 rustup target add wasm32-unknown-unknown
